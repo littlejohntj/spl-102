@@ -6,6 +6,8 @@ import fetch from "node-fetch";
 import { initializeApp } from "firebase/app"
 import { getFirestore } from "firebase/firestore"
 import { collection, addDoc } from "firebase/firestore"; 
+import { deserializeUnchecked } from "borsh";
+import { Metadata, METADATA_SCHEMA } from "./metadata-schema";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAmAy1hvCxvOHgusRscfLbrm5yOfX2gdas",
@@ -293,7 +295,7 @@ app.post('/search', async (req, res) => {
     for (let i = 0; i < results.length; i++) { 
       const candyMachineDescriptor = await processResultData(results[i]);
   
-      if ( candyMachineDescriptor != null && candyMachineDescriptor.itemsAvailable > 1000 ) {
+      if ( candyMachineDescriptor != null && candyMachineDescriptor.itemsRedeemed > 1 ) {
 
         // let todo = {
         //   candyMachineId: candyMachineDescriptor.candyMachineId,
@@ -307,22 +309,33 @@ app.post('/search', async (req, res) => {
         //   body: JSON.stringify(todo),
         //   headers: { 'Content-Type': 'application/json' }
         // }).then(res => res.json())
+
+        let todo = {
+          name: candyMachineDescriptor.name,
+          candyMachineId: candyMachineDescriptor.candyMachineId
+        };
+      
+        fetch('https://us-central1-minty-8755c.cloudfunctions.net/widgets/candy', {
+          method: 'POST',
+          body: JSON.stringify(todo),
+          headers: { 'Content-Type': 'application/json' }
+        }).then(res => res.json())
         
-        try {
-          const docRef = await addDoc(collection(db, "candy-storage"), {
-            name: candyMachineDescriptor.name,
-            candyMachineId: candyMachineDescriptor.candyMachineId,
-            configId: candyMachineDescriptor.configId,
-            treasury: candyMachineDescriptor.treasury,
-            goLiveDate: candyMachineDescriptor.goLiveDate.toString(),
-            itemsAvailable: candyMachineDescriptor.itemsAvailable.toString(),
-            itemsRedeemed: candyMachineDescriptor.itemsRedeemed.toString(),
-            price: candyMachineDescriptor.price.toString()
-          });
-          functions.logger.info("Document written with ID: ", docRef.id);
-        } catch (e) {
-          functions.logger.info("Error adding document: ", e);
-        }
+        // try { 
+        //   const docRef = await addDoc(collection(db, "candy-storage"), {
+        //     name: candyMachineDescriptor.name,
+        //     candyMachineId: candyMachineDescriptor.candyMachineId,
+        //     configId: candyMachineDescriptor.configId,
+        //     treasury: candyMachineDescriptor.treasury,
+        //     goLiveDate: candyMachineDescriptor.goLiveDate.toString(),
+        //     itemsAvailable: candyMachineDescriptor.itemsAvailable.toString(),
+        //     itemsRedeemed: candyMachineDescriptor.itemsRedeemed.toString(),
+        //     price: candyMachineDescriptor.price.toString()
+        //   });
+        //   functions.logger.info("Document written with ID: ", docRef.id);
+        // } catch (e) {
+        //   functions.logger.info("Error adding document: ", e);
+        // }
       } else {
         functions.logger.info("nothing cool here", i)
       }
@@ -335,66 +348,99 @@ app.post('/search', async (req, res) => {
 
 app.post('/candy', async (req, res) => { 
 
-  functions.logger.info("sup nerd");
+  const connection = new Connection("https://pentacle.genesysgo.net", "confirmed");
+  const metaPubKey = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s")
+  const creatorPubkey = new PublicKey(req.body.candyMachineId)
 
-  // const connection = new Connection("https://solana.genesysgo.net/", "confirmed");
-  // const accountDescriminator = AccountsCoder.accountDiscriminator("CandyMachine");
-  // const candyId = new PublicKey("cndyAnrLdpjq1Ssp1z8xxDsB8dxe7u4HL5Nxi2K5WXZ")
-  // const burner = new anchor.Wallet(Keypair.generate())
-  // const provider = new anchor.Provider(connection, burner, { skipPreflight: true })
-  // const idl = await anchor.Program.fetchIdl(candyId, provider)
-  // const program = new anchor.Program(idl!, candyId, provider)
-  // const buffer = req.body.buffer
+  const a = await connection.getProgramAccounts(
+    metaPubKey,
+    {
+      encoding: "base64",
+      filters: [
+        {
+          memcmp: {
+            offset: 326,
+            bytes: creatorPubkey.toBase58(),
+          },
+        },
+      ],
+    }
+  );
 
-  // const lol = Buffer.from(buffer)
-  // const candyMachine = program.coder.accounts.decode("CandyMachine", lol)
-  // const configAccountInfo = await connection.getAccountInfo(candyMachine.config)
-  // if ( configAccountInfo == null ) { return null }
-  // const configParsed = program.coder.accounts.decode("Config", configAccountInfo!.data)
-  // const index = 0
-  // const lineSlice = configAccountInfo!.data.slice(247 + 4 + ( index * 240 ) , 247 + 4 + ( (index + 1) * 240 ))
-  // const nameSlice = lineSlice.slice(4,36)
-  // const uriSlice = lineSlice.slice(40,230)
+  const deserialized = a.map((b) =>
+    deserializeUnchecked(METADATA_SCHEMA, Metadata, b.account.data)
+  );
+  const allPK = deserialized.map((g) => new PublicKey(g.mint).toBase58())
+  
+  function chunk (arr, len) {
 
-  // function spaceFilter( num: number ) {
-  //   return num != 0
-  // }
+    var chunks = [],
+        i = 0,
+        n = arr.length;
+  
+    while (i < n) {
+      chunks.push(arr.slice(i, i += len));
+    }
+  
+    return chunks;
+  }
 
-  // const filterUriSlice = uriSlice.filter(spaceFilter)
-  // const number = uriSlice.indexOf("%00")
-  // const name = String.fromCharCode(...nameSlice)
-  // const uri: string = String.fromCharCode(...filterUriSlice)
+  const chunks = chunk(allPK, 10)
 
-  // const response = await fetch(uri);
-  // const data = await response.json().catch( error => {
-  //   functions.logger.info(error)
-  // })
+  for (let i = 0; i < chunks.length; i++) {
 
-  //   const candyMachineId = req.body.candyMachineId
-  //   const configId = candyMachine.config.toBase58()
-  //   const treasury = candyMachine.wallet.toBase58()
-  //   const itemsRedeemed = candyMachine.itemsRedeemed
-  //   const itemsAvailable = candyMachine.data.itemsAvailable
-  //   // const projectName = name.split('#')[0]
-  //   // const projectDescription = data.description!
-  //   const price = 0
-  //   const goLiveDate = candyMachine.data.goLiveDate
-    // const royalty = data.seller_fee_basis_points
+    let todo = {
+      chunk: JSON.stringify(chunks[i])
+    };
 
-  // try {
-  //   const docRef = await addDoc(collection(db, "candy-storage"), {
-  //     name: name,
-  //     candyMachineId: candyMachineId,
-  //     configId: configId,
-  //     treasury: treasury,
-  //     goLiveDate: goLiveDate.toString(),
-  //     itemsAvailable: itemsAvailable.toString(),
-  //     itemsRedeemed: itemsRedeemed.toString(),
-  //     price: price.toString()
-  //   });
-  //   functions.logger.info("Document written with ID: ", docRef.id);
-  // } catch (e) {
-  //   functions.logger.info("Error adding document: ", e);
+    // fetch('https://us-central1-minty-8755c.cloudfunctions.net/widgets/handleChunk', {
+    //       method: 'POST',
+    //       body: JSON.stringify(todo),
+    //       headers: { 'Content-Type': 'application/json' }
+    //     }).then(res => res.json())
+
+  }
+
+  try {
+    const docRef = await addDoc(collection(db, "big-candy-storage"), {
+      name: req.body.name,
+      candyMachineId: req.body.candyMachineId
+    });
+    functions.logger.info("Document written with ID: ", docRef.id);
+  } catch (e) {
+    functions.logger.info("Error adding document: ", e);
+  }
+
+  const l = {
+    "msg": "Received POST request"
+  }
+  res.send(JSON.stringify(l)); 
+
+});
+
+app.post('/handleChunk', async (req, res) => {
+
+
+  const chunk = JSON.parse(req.body.chunk)
+
+  try {
+    const docRef = await addDoc(collection(db, "big-candy-storage"), {
+      wallet: chunk.length
+    });
+    functions.logger.info("Document written with ID: ", docRef.id);
+  } catch (e) {
+    functions.logger.info("Error adding document: ", e);
+  }
+
+  // for (let i = 0; i < chunk.length; i++) {
+  //   try {
+  //     const docRef = await addDoc(collection(db, "candy-storage"), {
+  //       wallet: chunk.length
+  //     });
+  //     functions.logger.info("Document written with ID: ", docRef.id);
+  //   } catch (e) {
+  //     functions.logger.info("Error adding document: ", e);
+  //   }
   // }
 
   const l = {
@@ -403,5 +449,6 @@ app.post('/candy', async (req, res) => {
   res.send(JSON.stringify(l)); 
 
 });
+
 
 exports.widgets = functions.https.onRequest(app)
